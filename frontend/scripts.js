@@ -8,6 +8,8 @@ const GPTResearcher = (() => {
   let currentReport = ''; // Store the current report (will be overwritten)
   let isFirstReport = true; // Flag to track if this is the first report
   let chatContainer = null; // Global reference to chat container
+  let historyLoadSequence = 0;
+  let chatInitialized = false;
   let lastRequestData = null; // Store the last request data for reconnection
 
   // Add WebSocket monitoring variables
@@ -23,6 +25,8 @@ const GPTResearcher = (() => {
   let reconnectInterval = 2000; // Start with 2 seconds
 
   const init = () => {
+    WorkspaceUI.init();
+    document.getElementById('newResearchBtn').addEventListener('click', newResearch);
     // Check if cookies are enabled
     checkCookiesEnabled();
 
@@ -88,7 +92,7 @@ const GPTResearcher = (() => {
       if (!cookieEnabled) {
         console.warn("Cookies are disabled in this browser");
         cookiesEnabled = false;
-        showToast("Cookies are disabled. History will use localStorage instead.", 5000);
+        showToast("浏览器已禁用 Cookie，历史记录将保存在本地存储中。", 5000);
       } else {
         // Clean up test cookie
         document.cookie = "testcookie=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
@@ -171,21 +175,21 @@ const GPTResearcher = (() => {
       // Add export history button with enhanced styling and tooltip
       const exportBtn = document.createElement('button');
       exportBtn.className = 'history-action-btn';
-      exportBtn.title = 'Export research history to file';
+      exportBtn.title = '导出研究历史';
       exportBtn.innerHTML = '<i class="fas fa-file-export"></i>';
       exportBtn.addEventListener('click', exportHistory);
 
       // Add import history button with enhanced styling and tooltip
       const importBtn = document.createElement('button');
       importBtn.className = 'history-action-btn';
-      importBtn.title = 'Import research history from file';
+      importBtn.title = '导入研究历史';
       importBtn.innerHTML = '<i class="fas fa-file-import"></i>';
       importBtn.addEventListener('click', triggerImportHistory);
 
       // Add cookie debug button with enhanced styling and tooltip
       const debugBtn = document.createElement('button');
       debugBtn.className = 'history-action-btn';
-      debugBtn.title = 'Check storage status';
+      debugBtn.title = '查看存储状态';
       debugBtn.innerHTML = '<i class="fas fa-database"></i>';
       debugBtn.addEventListener('click', checkCookieStatus);
 
@@ -297,7 +301,7 @@ const GPTResearcher = (() => {
 
     // Update research status
     if (researchStatusEl) {
-      researchStatusEl.textContent = isResearchActive ? 'Active' : 'Inactive';
+      researchStatusEl.textContent = isResearchActive ? '进行中' : '未进行';
     }
 
     // Update connection duration
@@ -311,7 +315,7 @@ const GPTResearcher = (() => {
     // Update last activity
     if (lastActivityEl && lastActivityTime) {
       const elapsed = Math.floor((Date.now() - lastActivityTime) / 1000);
-      lastActivityEl.textContent = elapsed < 60 ? `${elapsed} sec ago` : formatDuration(elapsed) + ' ago';
+      lastActivityEl.textContent = elapsed < 60 ? `${elapsed} 秒前` : formatDuration(elapsed) + '前';
     } else if (lastActivityEl) {
       lastActivityEl.textContent = '-';
     }
@@ -346,7 +350,7 @@ const GPTResearcher = (() => {
   const getSocketStatus = () => {
     if (!socket) {
       return {
-        statusText: 'Disconnected',
+        statusText: '未连接',
         indicatorClass: 'disconnected'
       };
     }
@@ -354,23 +358,23 @@ const GPTResearcher = (() => {
     switch (socket.readyState) {
       case WebSocket.CONNECTING:
         return {
-          statusText: 'Connecting',
+          statusText: '正在连接',
           indicatorClass: 'connecting'
         };
       case WebSocket.OPEN:
         return {
-          statusText: 'Connected',
+          statusText: '已连接',
           indicatorClass: 'connected'
         };
       case WebSocket.CLOSING:
         return {
-          statusText: 'Closing',
+          statusText: '正在断开',
           indicatorClass: 'connecting'
         };
       case WebSocket.CLOSED:
       default:
         return {
-          statusText: 'Disconnected',
+          statusText: '未连接',
           indicatorClass: 'disconnected'
         };
     }
@@ -380,28 +384,28 @@ const GPTResearcher = (() => {
   const getReadyStateText = (readyState) => {
     switch (readyState) {
       case WebSocket.CONNECTING:
-        return '0 (Connecting)';
+        return '0（正在连接）';
       case WebSocket.OPEN:
-        return '1 (Open)';
+        return '1（已连接）';
       case WebSocket.CLOSING:
-        return '2 (Closing)';
+        return '2（正在断开）';
       case WebSocket.CLOSED:
-        return '3 (Closed)';
+        return '3（已断开）';
       default:
-        return `${readyState} (Unknown)`;
+        return `${readyState}（未知）`;
     }
   }
 
   // Format duration in seconds to human-readable string
   const formatDuration = (seconds) => {
     if (seconds < 60) {
-      return `${seconds} sec`;
+      return `${seconds} 秒`;
     } else if (seconds < 3600) {
-      return `${Math.floor(seconds / 60)} min ${seconds % 60} sec`;
+      return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
     } else {
       const hours = Math.floor(seconds / 3600);
       const minutes = Math.floor((seconds % 3600) / 60);
-      return `${hours} hr ${minutes} min`;
+      return `${hours} 小时 ${minutes} 分`;
     }
   }
 
@@ -460,6 +464,7 @@ const GPTResearcher = (() => {
       // Only keep minimal fields: prompt, links and timestamp
       storageHistory = storageHistory.map(entry => ({
         prompt: entry.prompt || '',
+        title: entry.title || '',
         links: entry.links || {},
         timestamp: entry.timestamp || new Date().toISOString()
       }));
@@ -470,31 +475,31 @@ const GPTResearcher = (() => {
       setCookie('conversationHistory', jsonString, 30);
 
       if (storageHistory.length > 0 && !isInitialLoad) {
-        showToast('Research history saved!');
+        showToast('研究历史已保存！');
       }
     } catch (error) {
       console.error('Error saving research history:', error);
-      showToast('Error saving history. Some entries may not be saved.');
+      showToast('历史记录保存失败，部分记录可能未保存。');
     }
   }
 
   // Delete a history entry
   const deleteHistoryEntry = (index) => {
-    if (confirm('Are you sure you want to delete this research entry?')) {
+    if (confirm('确定删除这条研究记录吗？')) {
       conversationHistory.splice(index, 1);
       saveConversationHistory();
       renderHistoryEntries();
-      showToast('Entry deleted successfully');
+      showToast('研究记录已删除');
     }
   }
 
   // Clear all conversation history
   const clearConversationHistory = () => {
-    if (confirm('Are you sure you want to clear all research history? This cannot be undone.')) {
+    if (confirm('确定清空全部研究历史吗？此操作无法撤销。')) {
       conversationHistory = [];
       saveConversationHistory();
       renderHistoryEntries();
-      showToast('Research history cleared successfully');
+      showToast('研究历史已清空');
     }
   }
 
@@ -540,7 +545,7 @@ const GPTResearcher = (() => {
     historyEntries.innerHTML = '';
 
     if (!conversationHistory || conversationHistory.length === 0) {
-      historyEntries.innerHTML = '<p class="text-center mt-4 text-muted">No research history yet.</p>';
+      historyEntries.innerHTML = '<p class="text-center mt-4 text-muted">暂无研究历史。</p>';
       return;
     }
 
@@ -564,8 +569,8 @@ const GPTResearcher = (() => {
       if (entry.timestamp) {
         try {
           const timestamp = new Date(entry.timestamp);
-          const formattedDate = timestamp.toLocaleDateString();
-          const formattedTime = timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const formattedDate = timestamp.toLocaleDateString('zh-CN');
+          const formattedTime = timestamp.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
           timestampHTML = `<span class="history-entry-timestamp">${formattedDate} ${formattedTime}</span>`;
         } catch (e) {
           console.error('Error formatting timestamp:', e);
@@ -575,22 +580,32 @@ const GPTResearcher = (() => {
       // Make sure links object exists
       const links = entry.links || {};
 
-      // Build the HTML for the entry with enhanced formatting
+      entryElement.tabIndex = 0;
+      entryElement.setAttribute('role', 'button');
+      entryElement.setAttribute('aria-label', entry.title || entry.prompt || '未命名研究');
+      entryElement.addEventListener('keydown', (event) => {
+        if (event.target !== entryElement) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          loadResearchEntry(index);
+        }
+      });
       entryElement.innerHTML = `
         <div class="history-entry-header">
-          <h4 class="history-entry-title">${entry.prompt || 'Unnamed Research'}</h4>
-          ${timestampHTML}
-        </div>
-        <div class="history-entry-format">
-          ${links.pdf ? `<a href="${links.pdf}" class="history-entry-action" target="_blank" title="Open PDF Report"><i class="fas fa-file-pdf"></i> PDF</a>` : ''}
-          ${links.docx ? `<a href="${links.docx}" class="history-entry-action" target="_blank" title="Open Word Document"><i class="fas fa-file-word"></i> Word</a>` : ''}
-          ${links.md ? `<a href="${links.md}" class="history-entry-action" target="_blank" title="Open Markdown File"><i class="fas fa-file-lines"></i> MD</a>` : ''}
-          ${links.json ? `<a href="${links.json}" class="history-entry-action" target="_blank" title="Open JSON Data"><i class="fas fa-file-code"></i> JSON</a>` : ''}
-        </div>
-        <div class="history-entry-actions">
-          <button class="history-entry-action delete-entry" title="Delete this research entry"><i class="fas fa-trash-alt"></i></button>
-        </div>
-      `;
+          <h4 class="history-entry-title">${escapeHtml(entry.title || entry.prompt || '未命名研究')}</h4>
+          <div class="history-entry-actions">
+            <button class="history-entry-action rename-entry" title="重命名" aria-label="重命名"><i class="fas fa-pen"></i></button>
+            <button class="history-entry-action delete-entry" title="删除这条研究记录" aria-label="删除这条研究记录"><i class="fas fa-trash-alt"></i></button>
+          </div>
+        </div>${timestampHTML}`;
+      entryElement.querySelector('.rename-entry').addEventListener('click', (event) => {
+        event.stopPropagation();
+        const title = prompt('研究标题', entry.title || entry.prompt || '');
+        if (!title?.trim()) return;
+        entry.title = title.trim();
+        saveConversationHistory();
+        renderHistoryEntries();
+      });
 
       // Add action button handlers
       const deleteBtn = entryElement.querySelector('.delete-entry');
@@ -606,81 +621,62 @@ const GPTResearcher = (() => {
         entryElement.style.animationDelay = `${index * 50}ms`;
       }, 0);
     });
+    filterHistoryEntries();
   }
 
   // Load a research entry from history
-  const loadResearchEntry = (index) => {
+  const newResearch = () => {
+    if (isResearchActive) {
+      showToast('研究正在进行，请完成后再新建研究。');
+      return;
+    }
+    historyLoadSequence++;
+    dispose_socket?.();
+    lastRequestData = null;
+    currentReport = '';
+    allReports = '';
+    document.getElementById('task').value = '';
+    document.getElementById('output').replaceChildren();
+    document.querySelectorAll('.history-entry.active').forEach((entry) => entry.classList.remove('active'));
+    updateState('initial');
+    document.getElementById('task').focus();
+  };
+
+  const loadResearchEntry = async (index) => {
+    if (isResearchActive) {
+      showToast('研究正在进行，请完成后再切换历史记录。');
+      return;
+    }
     const entry = conversationHistory[index];
     if (!entry) return;
-
-    // Fill form with the entry data
-    document.getElementById('task').value = entry.prompt; // Changed from entry.task for consistency
-    
-    // Check if report_type, report_source, and tone are in entry, otherwise use defaults or skip
-    const reportTypeSelect = document.querySelector('select[name="report_type"]');
-    if (reportTypeSelect && entry.reportType) {
-        reportTypeSelect.value = entry.reportType;
-    } else if (reportTypeSelect) {
-        reportTypeSelect.value = reportTypeSelect.options[0].value; // Default to first option
+    const sequence = ++historyLoadSequence;
+    dispose_socket?.();
+    lastRequestData = null;
+    document.getElementById('task').value = entry.prompt || '';
+    document.getElementById('output').replaceChildren();
+    document.querySelectorAll('.history-entry').forEach((element) => {
+      element.classList.toggle('active', Number(element.dataset.id) === index);
+    });
+    WorkspaceUI.setState('loading', entry.title || entry.prompt);
+    try {
+      const path = WorkspaceUI.safeReportPath(entry.links?.md);
+      if (!path) throw new Error('这条记录没有可读取的 Markdown 文件');
+      const response = await fetch(path);
+      if (!response.ok) throw new Error('报告文件已不存在或无法读取');
+      const markdown = await response.text();
+      if (sequence !== historyLoadSequence) return;
+      currentReport = markdown;
+      WorkspaceUI.setReport(markdown);
+      WorkspaceUI.setDownloads(entry.links);
+      WorkspaceUI.setState('history');
+      document.getElementById('copyToClipboardTop').style.display = 'inline-flex';
+    } catch (error) {
+      if (sequence !== historyLoadSequence) return;
+      WorkspaceUI.setState('error');
+      addAgentResponse({ output: escapeHtml(error.message) });
+      showToast(error.message);
     }
-
-    const reportSourceSelect = document.querySelector('select[name="report_source"]');
-    if (reportSourceSelect && entry.reportSource) {
-        reportSourceSelect.value = entry.reportSource;
-    } else if (reportSourceSelect) {
-        reportSourceSelect.value = reportSourceSelect.options[0].value; // Default to first option
-    }
-
-    const toneSelect = document.querySelector('select[name="tone"]');
-    if (toneSelect && entry.tone) {
-        toneSelect.value = entry.tone;
-    } else if (toneSelect) {
-        toneSelect.value = toneSelect.options[0].value; // Default to first option
-    }
-
-    const queryDomainsInput = document.querySelector('input[name="query_domains"]');
-    if (queryDomainsInput) {
-        if (entry.queryDomains && Array.isArray(entry.queryDomains) && entry.queryDomains.length > 0) {
-            queryDomainsInput.value = entry.queryDomains.join(', ');
-        } else {
-            queryDomainsInput.value = ''; // Clear if not present
-        }
-    }
-
-    // Clear current research/report areas
-    document.getElementById('output').innerHTML = '';
-    document.getElementById('reportContainer').innerHTML = '';
-    document.getElementById('selectedImagesContainer').innerHTML = '';
-    document.getElementById('selectedImagesContainer').style.display = 'none';
-
-    // Hide download bar and chat
-    const stickyDownloadsBar = document.getElementById('stickyDownloadsBar');
-    if (stickyDownloadsBar) {
-        stickyDownloadsBar.classList.remove('visible');
-    }
-    const chatContainer = document.getElementById('chatContainer');
-    if (chatContainer) {
-        chatContainer.style.display = 'none';
-    }
-
-    // Reset UI state and report-specific buttons
-    updateState('initial'); // This will hide copy buttons etc.
-
-    // Close the history panel
-    const historyPanel = document.getElementById('historyPanel');
-    if (historyPanel) {
-        historyPanel.classList.remove('open');
-    }
-
-    // Scroll to the form
-    const formElement = document.getElementById('form');
-    if (formElement) {
-        formElement.scrollIntoView({ behavior: 'smooth' });
-    }
-
-    // Inform user
-    showToast('Research parameters loaded. You can start the research again.');
-  }
+  };
 
   // Copy entry content to clipboard
   const copyEntryToClipboard = (index) => {
@@ -695,7 +691,7 @@ const GPTResearcher = (() => {
     document.body.removeChild(textarea);
 
     // Show a toast notification
-    showToast('Research content copied to clipboard!');
+    showToast('研究内容已复制到剪贴板！');
   }
 
   // Show a toast notification
@@ -723,7 +719,7 @@ const GPTResearcher = (() => {
   const saveToHistory = (report, downloadLinks) => {
     if (!downloadLinks) {
       console.error('No download links provided');
-      showToast('Error: Could not save research to history');
+      showToast('无法将研究保存到历史记录');
       return;
     }
 
@@ -756,12 +752,7 @@ const GPTResearcher = (() => {
     renderHistoryEntries();
     document.getElementById('historyPanel').classList.add('open');
 
-    // Prompt user about storage method
-    if (cookiesEnabled) {
-      showToast('Research saved! Your history is stored in a browser cookie.');
-    } else {
-      showToast('Research saved! Your history is stored using localStorage.');
-    }
+    showToast('研究已保存到历史记录。');
   }
 
   // Function to update the research icon spinning state
@@ -777,6 +768,10 @@ const GPTResearcher = (() => {
   };
 
   const startResearch = () => {
+    if (isResearchActive || !document.getElementById('task').value.trim()) return;
+    if (!document.getElementById('researchForm').reportValidity()) return;
+    historyLoadSequence++;
+    lastRequestData = null;
     document.getElementById('output').innerHTML = ''
     document.getElementById('reportContainer').innerHTML = ''
     dispose_socket?.() // Call previous dispose function if it exists
@@ -805,7 +800,7 @@ const GPTResearcher = (() => {
     updateState('in_progress')
 
     addAgentResponse({
-      output: '🧙‍♂️ Gathering information and analyzing your research topic...',
+      output: '🧙‍♂️ 正在搜集资料并分析你的研究主题……',
     })
 
     // Scroll to the "Research Progress" section
@@ -827,8 +822,11 @@ const GPTResearcher = (() => {
 
     // Set a timeout for connection - if it takes too long, stop the spinner
     connectionTimeout = setTimeout(() => {
-      updateResearchIcon(false);
-      console.log("WebSocket connection timed out");
+      if (thisSocket.readyState !== WebSocket.OPEN) {
+        updateState('error');
+        addAgentResponse({ output: '连接超时，请确认服务可用后重新尝试。' });
+        dispose_socket?.();
+      }
     }, 10000); // 10 seconds timeout
 
     // Configure Showdown converter to properly handle code blocks
@@ -857,6 +855,7 @@ const GPTResearcher = (() => {
     let downloadLinkData = null; // Store download links
 
     socket.onmessage = (event) => {
+      if (thisSocket !== socket) return;
       // Reset reconnect attempts on successful message
       reconnectAttempts = 0;
 
@@ -1016,12 +1015,15 @@ const GPTResearcher = (() => {
       // new research run closes after that run has set isResearchActive, and
       // reconnecting it would open a second connection competing for the run.
       if (isResearchActive && thisSocket === socket) {
-        reconnectWebSocket();
+        updateState('error');
+        addAgentResponse({ output: '连接已断开，研究未完成。请确认服务可用后重新尝试。' });
       }
     }
 
     socket.onerror = (error) => {
       console.error("WebSocket error:", error);
+      updateState('error');
+      addAgentResponse({ output: '连接失败，请确认研究服务已启动后重新尝试。' });
       updateWebSocketStatus();
     }
 
@@ -1030,6 +1032,7 @@ const GPTResearcher = (() => {
       try {
         isResearchActive = false; // Mark research as inactive
         thisSocket.onclose = null;
+        if (socket === thisSocket) socket = null;
         if (thisSocket.readyState !== WebSocket.CLOSED && thisSocket.readyState !== WebSocket.CLOSING) {
           thisSocket.close();
         }
@@ -1058,10 +1061,20 @@ const GPTResearcher = (() => {
   };
 
   const addAgentResponse = (data) => {
+    WorkspaceUI.setProgress(data);
+    if (data.content === 'error') updateState('error');
     const output = document.getElementById('output');
     const responseDiv = document.createElement('div');
     responseDiv.className = 'agent_response';
-    responseDiv.innerHTML = sanitizeHtml(data.output);
+    let message = data.output;
+    if (data.content === 'error' && typeof message === 'string') {
+      if (message.startsWith('Error: Set SMART_LLM or FAST_LLM')) {
+        message = '模型配置格式错误：FAST_LLM、SMART_LLM 和 STRATEGIC_LLM 都需要填写“服务商:模型名称”，例如 deepseek:deepseek-flash。修改 .env 后请重启服务。';
+      } else {
+        message = message.replace(/^Error:\s*/, '错误：');
+      }
+    }
+    responseDiv.innerHTML = sanitizeHtml(message);
     output.appendChild(responseDiv);
     output.scrollTop = output.scrollHeight;
     output.style.display = 'block';
@@ -1074,7 +1087,7 @@ const GPTResearcher = (() => {
 
     const heading = document.createElement('p');
     heading.className = 'sub-questions-heading';
-    heading.textContent = '🤔 Pondering your question from several angles';
+    heading.textContent = '🤔 正在从多个角度分析你的问题';
     container.appendChild(heading);
 
     const list = document.createElement('div');
@@ -1093,27 +1106,10 @@ const GPTResearcher = (() => {
   }
 
   const writeReport = (data, converter, isFinal = false, append = false) => {
-    const reportContainer = document.getElementById('reportContainer');
-
-    // Convert markdown to HTML, then sanitize to prevent XSS from untrusted
-    // report content (scraped pages / LLM output).
-    const markdownOutput = sanitizeHtml(converter.makeHtml(data.output));
-
-    // If this is the final report or we should append
-    if (isFinal) {
-      // For final reports, always replace content
-      reportContainer.innerHTML = markdownOutput;
-    } else if (append) {
-      // Append mode - add to existing content
-      reportContainer.innerHTML += markdownOutput;
-    } else {
-      // Replace mode - overwrite existing content
-      reportContainer.innerHTML = markdownOutput;
-    }
-
-    // Auto-scroll to the bottom of the container
-    reportContainer.scrollTop = reportContainer.scrollHeight;
-  }
+    // Accumulate Markdown before parsing so streamed tables and links stay intact.
+    currentReport = append && !isFinal ? currentReport + data.output : data.output;
+    WorkspaceUI.setReport(currentReport);
+  };
 
   const updateDownloadLink = (data) => {
     if (!data.output) {
@@ -1127,82 +1123,28 @@ const GPTResearcher = (() => {
     // Store these links for history
     const currentLinks = { pdf, docx, md, json };
 
-    // Helper function to safely update link
-    const updateLink = (id, path) => {
-      const element = document.getElementById(id);
-      if (element && path) {
-        console.log(`Setting ${id} href to:`, path);
-        element.setAttribute('href', path);
-        element.classList.remove('disabled');
-      } else {
-        console.warn(`Either element ${id} not found or path not provided`);
-      }
-    };
-
-    // Update links in sticky download bar
-    updateLink('downloadLink', pdf);
-    updateLink('downloadLinkWord', docx);
-    updateLink('downloadLinkMd', md);
-    updateLink('downloadLinkJson', json);
-
-    // Update duplicate buttons above the report
-    updateLink('downloadLinkTop', pdf);
-    updateLink('downloadLinkWordTop', docx);
-    updateLink('downloadLinkMdTop', md);
-    updateLink('downloadLinkJsonTop', json);
-
-    // Make sure download buttons are visible when download links are ready
-    showDownloadPanels();
+    WorkspaceUI.setDownloads(currentLinks);
 
     // Return links for history saving
     return currentLinks;
   }
 
-  const copyToClipboard = () => {
-    const textarea = document.createElement('textarea')
-    textarea.id = 'temp_element'
-    textarea.style.height = 0
-    document.body.appendChild(textarea)
-    textarea.value = document.getElementById('reportContainer').innerText
-    const selector = document.querySelector('#temp_element')
-    selector.select()
-    document.execCommand('copy')
-    document.body.removeChild(textarea)
-
-    // Show a temporary success message with icon change and toast notification
-    const copyBtn = document.getElementById('copyToClipboard');
-    const copyBtnTop = document.getElementById('copyToClipboardTop');
-
-    // Function to reset the icon for both buttons
-    const resetIcons = () => {
-      if (copyBtn) {
-        copyBtn.innerHTML = '<i class="fas fa-copy"></i> Copy';
-      }
-      if (copyBtnTop) {
-        copyBtnTop.innerHTML = '<i class="fas fa-copy"></i>';
-      }
-    };
-
-    // Change to green check mark
-    if (copyBtn) {
-      copyBtn.innerHTML = '<i class="fas fa-check" style="color: green;"></i> Copied!';
+  const copyToClipboard = async () => {
+    const report = WorkspaceUI.getReport();
+    if (!report) return;
+    try {
+      await navigator.clipboard.writeText(report);
+      showToast('已复制报告 Markdown');
+    } catch {
+      showToast('复制失败，请允许浏览器访问剪贴板，或下载 Markdown 文件。');
     }
-    if (copyBtnTop) {
-      copyBtnTop.innerHTML = '<i class="fas fa-check" style="color: green;"></i>';
-    }
-
-    // Show toast notification
-    showToast('Copied to clipboard!');
-
-    // Reset the button after 3 seconds
-    setTimeout(resetIcons, 3000);
-  }
+  };
 
   const updateState = (state) => {
     var status = ''
     switch (state) {
       case 'in_progress':
-        status = 'Research in progress...'
+        status = '正在研究……'
         setReportActionsStatus('disabled')
         isResearchActive = true;
         // Make the research icon spin
@@ -1224,7 +1166,7 @@ const GPTResearcher = (() => {
         }
         break
       case 'finished':
-        status = 'Research finished!'
+        status = '研究已完成！'
         setReportActionsStatus('enabled')
         isResearchActive = false;
         // Stop the research icon spinning
@@ -1261,7 +1203,7 @@ const GPTResearcher = (() => {
         }
         break
       case 'error':
-        status = 'Research failed!'
+        status = '研究失败，请查看运行日志。'
         setReportActionsStatus('disabled')
         isResearchActive = false;
         // Stop the research icon spinning
@@ -1287,6 +1229,7 @@ const GPTResearcher = (() => {
       default:
         setReportActionsStatus('disabled')
     }
+    WorkspaceUI.setState(state, state === 'initial' ? '' : document.getElementById('task').value);
     document.getElementById('status').innerHTML = status
     if (document.getElementById('status').innerHTML == '') {
       document.getElementById('status').style.display = 'none'
@@ -1354,7 +1297,7 @@ const GPTResearcher = (() => {
       images.forEach(imageUrl => {
         const imgElement = document.createElement('img')
         imgElement.src = imageUrl
-        imgElement.alt = 'Research Image'
+        imgElement.alt = '研究配图'
         imgElement.style.maxWidth = '200px'
         imgElement.style.margin = '5px'
         imgElement.style.cursor = 'pointer'
@@ -1363,7 +1306,7 @@ const GPTResearcher = (() => {
       })
       imageContainer.style.display = 'block'
     } else {
-      imageContainer.innerHTML += '<p>No images found for this research.</p>'
+      imageContainer.innerHTML += '<p>本次研究未找到相关图片。</p>'
     }
   }
 
@@ -1374,10 +1317,10 @@ const GPTResearcher = (() => {
         dialog.className = 'image-dialog';
 
         const img = document.createElement('img');
-        img.alt = 'Full-size Research Image';
+        img.alt = '研究配图原图';
 
         const closeBtn = document.createElement('button');
-        closeBtn.textContent = 'Close';
+        closeBtn.textContent = '关闭';
         closeBtn.className = 'close-btn'; // Added class for styling
 
         dialog.appendChild(img);
@@ -1411,24 +1354,8 @@ const GPTResearcher = (() => {
 
   // Function to show download bar and enable buttons
   const showDownloadPanels = () => {
-    // Show the bar by adding the visible class
-    const stickyDownloadsBar = document.getElementById('stickyDownloadsBar');
-    if (stickyDownloadsBar) {
-      stickyDownloadsBar.classList.add('visible');
-    }
-
-    // Enable all download buttons
-    const downloadButtons = document.querySelectorAll('.download-option-btn, .report-action-btn');
-    downloadButtons.forEach(button => {
-      button.classList.remove('disabled');
-    });
-
-    // Make top buttons report-actions section visible
-    const reportActions = document.querySelector('.report-actions');
-    if (reportActions) {
-      reportActions.style.display = 'flex';
-    }
-  }
+    // Download controls live in the report reader and reflect available paths.
+  };
 
   // --- Storage Helpers (Cookies or LocalStorage) ---
   function setCookie(name, value, days) {
@@ -1464,7 +1391,7 @@ const GPTResearcher = (() => {
     // If cookie is too large, display warning and truncate history
     if (cookieSize > MAX_COOKIE_SIZE) {
       console.warn(`Cookie size (${cookieSize} bytes) exceeds the ${MAX_COOKIE_SIZE} bytes limit!`);
-      showToast('Warning: History too large for cookie storage! Oldest entries will be removed.');
+      showToast('历史记录超出 Cookie 容量限制，将移除最早的记录。');
 
       if (name === 'conversationHistory') {
         try {
@@ -1555,15 +1482,15 @@ const GPTResearcher = (() => {
           const parsed = JSON.parse(storageData);
           const entryCount = Array.isArray(parsed) ? parsed.length : 0;
 
-          showToast(`Using localStorage: ${kilobyteSize}KB, ${entryCount} entries`);
+          showToast(`本地存储：${kilobyteSize} KB，共 ${entryCount} 条记录`);
           console.debug(`LocalStorage size: ${byteSize} bytes, ${kilobyteSize}KB`);
           console.debug(`LocalStorage entries: ${entryCount}`);
         } catch (e) {
-          showToast(`LocalStorage contains invalid data: ${kilobyteSize}KB`);
+          showToast(`本地存储数据格式无效：${kilobyteSize} KB`);
           console.error('LocalStorage parse error:', e);
         }
       } else {
-        showToast('No research history found in localStorage');
+        showToast('本地存储中没有研究历史');
       }
       return;
     }
@@ -1580,15 +1507,15 @@ const GPTResearcher = (() => {
         const parsed = JSON.parse(conversationCookie);
         const entryCount = Array.isArray(parsed) ? parsed.length : 0;
 
-        showToast(`Cookie found: ${kilobyteSize}KB, ${entryCount} research entries`);
+        showToast(`Cookie 存储：${kilobyteSize} KB，共 ${entryCount} 条研究记录`);
         console.debug(`Cookie size: ${byteSize} bytes, ${kilobyteSize}KB`);
         console.debug(`Cookie entries: ${entryCount}`);
       } catch (e) {
-        showToast(`Cookie found but invalid: ${kilobyteSize}KB`);
+        showToast(`Cookie 数据格式无效：${kilobyteSize} KB`);
         console.error('Cookie parse error:', e);
       }
     } else {
-      showToast('No research history cookie found');
+      showToast('Cookie 中没有研究历史');
     }
   }
 
@@ -1596,7 +1523,7 @@ const GPTResearcher = (() => {
   const exportHistory = () => {
     try {
       if (!conversationHistory || conversationHistory.length === 0) {
-        showToast('No research history to export');
+        showToast('没有可导出的研究历史');
         return;
       }
 
@@ -1627,11 +1554,11 @@ const GPTResearcher = (() => {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
-      showToast('Research history exported to JSON file');
+      showToast('研究历史已导出为 JSON 文件');
       console.debug('History exported, entries:', conversationHistory.length);
     } catch (error) {
       console.error('Error exporting history:', error);
-      showToast('Error exporting research history');
+      showToast('研究历史导出失败');
     }
   }
 
@@ -1641,7 +1568,7 @@ const GPTResearcher = (() => {
     if (fileInput) {
       fileInput.click();
     } else {
-      showToast('Import functionality not available');
+      showToast('导入功能不可用');
     }
   }
 
@@ -1673,7 +1600,7 @@ const GPTResearcher = (() => {
         });
 
         if (validEntries.length === 0) {
-          showToast('No valid research entries found in the imported file');
+          showToast('导入文件中没有有效的研究记录');
           return;
         }
 
@@ -1688,9 +1615,9 @@ const GPTResearcher = (() => {
 
         // Confirm before overwriting existing history
         if (conversationHistory && conversationHistory.length > 0) {
-          if (confirm(`You have ${conversationHistory.length} existing research entries. Do you want to:
-- Click OK to MERGE imported history with existing history
-- Click Cancel to REPLACE all existing history with imported data`)) {
+          if (confirm(`当前已有 ${conversationHistory.length} 条研究记录：
+- 点击“确定”，将导入记录与现有记录合并
+- 点击“取消”，用导入记录替换全部现有记录`)) {
             // Merge with existing history
             conversationHistory = [...mappedEntries, ...conversationHistory];
           } else {
@@ -1706,12 +1633,12 @@ const GPTResearcher = (() => {
         saveConversationHistory();
         renderHistoryEntries();
 
-        showToast(`Successfully imported ${validEntries.length} research entries`);
+        showToast(`已成功导入 ${validEntries.length} 条研究记录`);
         console.debug('Research history imported, valid entries:', validEntries.length);
 
       } catch (error) {
         console.error('Error importing history:', error);
-        showToast('Error importing research history: Invalid file format');
+        showToast('研究历史导入失败：文件格式无效');
       }
 
       // Reset the file input so the same file can be selected again
@@ -1720,7 +1647,7 @@ const GPTResearcher = (() => {
 
     reader.onerror = () => {
       console.error('Error reading file');
-      showToast('Error reading the imported file');
+      showToast('无法读取导入文件');
       event.target.value = '';
     };
 
@@ -1741,9 +1668,12 @@ const GPTResearcher = (() => {
       chatMessages.innerHTML = '';
     }
 
+    if (chatInitialized) return;
+    chatInitialized = true;
+
     // Add event listeners for chat input
     chatInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         sendChatMessage();
       }
@@ -1763,7 +1693,7 @@ const GPTResearcher = (() => {
     });
 
     // Add welcome message
-    addChatMessage('I can answer questions about the research report. What would you like to know?', false);
+    addChatMessage('我可以回答有关这份研究报告的问题，你想了解什么？', false);
   }
 
   // Initialize speech recognition
@@ -1781,7 +1711,7 @@ const GPTResearcher = (() => {
 
     // Configure speech recognition
     recognition.continuous = false;
-    recognition.lang = 'en-US';
+    recognition.lang = 'zh-CN';
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
 
@@ -1794,10 +1724,10 @@ const GPTResearcher = (() => {
       finalTranscript = '';
       button.classList.add('listening');
       button.innerHTML = '<i class="fas fa-microphone-slash"></i>';
-      button.title = 'Stop listening';
+      button.title = '停止语音输入';
 
       // Show visual feedback
-      showToast('Listening...', 1000);
+      showToast('正在聆听……', 1000);
     };
 
     recognition.onresult = (event) => {
@@ -1827,9 +1757,9 @@ const GPTResearcher = (() => {
       resetRecognition();
 
       if (event.error === 'not-allowed') {
-        showToast('Microphone access denied. Please allow microphone access in your browser settings.', 3000);
+        showToast('无法访问麦克风，请在浏览器设置中允许麦克风权限。', 3000);
       } else {
-        showToast('Speech recognition error: ' + event.error, 3000);
+        showToast('语音识别失败：' + event.error, 3000);
       }
     };
 
@@ -1842,7 +1772,7 @@ const GPTResearcher = (() => {
       isListening = false;
       button.classList.remove('listening');
       button.innerHTML = '<i class="fas fa-microphone"></i>';
-      button.title = 'Use voice input';
+      button.title = '使用语音输入';
     };
 
     // Toggle speech recognition on button click
@@ -1860,7 +1790,7 @@ const GPTResearcher = (() => {
     // Don't attempt too many reconnections
     if (reconnectAttempts >= maxReconnectAttempts) {
       console.error(`Failed to reconnect after ${maxReconnectAttempts} attempts`);
-      addChatMessage(`Unable to reconnect after ${maxReconnectAttempts} attempts. Please refresh the page.`, false);
+      addChatMessage(`尝试重连 ${maxReconnectAttempts} 次后仍未成功，请刷新页面。`, false);
       return false;
     }
 
@@ -1871,7 +1801,7 @@ const GPTResearcher = (() => {
     console.log(`Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts}) in ${backoff}ms...`);
 
     // Show reconnection status to user
-    addChatMessage(`Connection lost. Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts})...`, false);
+    addChatMessage(`连接已断开，正在尝试重连（${reconnectAttempts}/${maxReconnectAttempts}）……`, false);
 
     // Try to reconnect after delay
     setTimeout(() => {
@@ -1932,19 +1862,8 @@ const GPTResearcher = (() => {
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(messageToSend);
     } else {
-      // If socket is closed, try to reconnect
       removeLoadingIndicator(loadingId);
-
-      // Reset reconnect attempts if this is a new chat session
-      if (reconnectAttempts >= maxReconnectAttempts) {
-        reconnectAttempts = 0;
-      }
-
-      // Attempt to reconnect and queue the message to be sent after reconnection
-      if (!reconnectWebSocket(messageToSend)) {
-        // If reconnection fails or max attempts reached
-        addChatMessage('Unable to send message. Connection is unavailable.', false);
-      }
+      addChatMessage('当前报告的连接已断开。报告仍可阅读和下载；如需继续提问，请重新开展研究。', false);
     }
   }
 
@@ -1970,20 +1889,21 @@ const GPTResearcher = (() => {
     }
 
     // Set message content
-    messageEl.innerHTML = isUser ? escapeHtml(processedMessage) : processedMessage;
+    messageEl.innerHTML = isUser ? escapeHtml(processedMessage) : sanitizeHtml(processedMessage);
 
     // Add timestamp
     const timestampEl = document.createElement('div');
     timestampEl.className = 'chat-timestamp';
     const now = new Date();
-    timestampEl.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    timestampEl.textContent = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
     messageEl.appendChild(timestampEl);
 
     // Add to chat container
     chatMessages.appendChild(messageEl);
 
     // Scroll to bottom
-    chatMessages.scrollTop = chatMessages.scrollHeight;
+    const scroller = document.getElementById('conversationScroll');
+    scroller.scrollTop = scroller.scrollHeight;
   }
 
   // Add a loading indicator
@@ -2097,7 +2017,7 @@ const GPTResearcher = (() => {
       if (element.classList.contains('expanded-view')) {
         buttonIcon.classList.remove('fa-compress-alt');
         buttonIcon.classList.add('fa-compress-alt');
-        button.title = 'Collapse'; // Update title to Collapse
+        button.title = '收起'; // Update title to Collapse
 
         // Find content containers and expand their height
         const contentContainers = element.querySelectorAll('#reportContainer, #output, #chatMessages');
@@ -2114,7 +2034,7 @@ const GPTResearcher = (() => {
       } else {
         buttonIcon.classList.remove('fa-compress-alt');
         buttonIcon.classList.add('fa-expand-alt');
-        button.title = 'Expand'; // Update title to Expand
+        button.title = '展开'; // Update title to Expand
 
         // Reset heights back to original when collapsed
         const contentContainers = element.querySelectorAll('#reportContainer, #output, #chatMessages');
@@ -2203,7 +2123,7 @@ const GPTResearcher = (() => {
     
     if (!configText || configText === '[]') {
       mcpConfig.className = 'form-control mcp-config-textarea';
-      mcpConfigStatus.textContent = 'Empty configuration';
+      mcpConfigStatus.textContent = '尚未配置服务';
       mcpConfigStatus.className = 'mcp-status-text';
       return true;
     }
@@ -2212,17 +2132,17 @@ const GPTResearcher = (() => {
       const parsed = JSON.parse(configText);
       
       if (!Array.isArray(parsed)) {
-        throw new Error('Configuration must be an array');
+        throw new Error('配置必须是 JSON 数组');
       }
 
       // Validate each server config
       const errors = [];
       parsed.forEach((server, index) => {
         if (!server.name) {
-          errors.push(`Server ${index + 1}: missing name`);
+          errors.push(`第 ${index + 1} 个服务：缺少 name`);
         }
         if (!server.command && !server.connection_url) {
-          errors.push(`Server ${index + 1}: missing command or connection_url`);
+          errors.push(`第 ${index + 1} 个服务：缺少 command 或 connection_url`);
         }
       });
 
@@ -2231,13 +2151,13 @@ const GPTResearcher = (() => {
       }
 
       mcpConfig.className = 'form-control mcp-config-textarea valid';
-      mcpConfigStatus.textContent = `Valid JSON ✓ (${parsed.length} server${parsed.length !== 1 ? 's' : ''})`;
+      mcpConfigStatus.textContent = `JSON 格式有效 ✓（${parsed.length} 个服务）`;
       mcpConfigStatus.className = 'mcp-status-text valid';
       return true;
 
     } catch (error) {
       mcpConfig.className = 'form-control mcp-config-textarea invalid';
-      mcpConfigStatus.textContent = `Invalid JSON: ${error.message}`;
+      mcpConfigStatus.textContent = `JSON 格式无效：${error.message}`;
       mcpConfigStatus.className = 'mcp-status-text invalid';
       return false;
     }
@@ -2252,9 +2172,9 @@ const GPTResearcher = (() => {
       const parsed = JSON.parse(mcpConfig.value.trim() || '[]');
       mcpConfig.value = JSON.stringify(parsed, null, 2);
       validateMCPConfig();
-      showToast('JSON formatted successfully!');
+      showToast('JSON 已格式化！');
     } catch (error) {
-      showToast('Cannot format invalid JSON');
+      showToast('JSON 格式无效，无法格式化');
     }
   };
 
@@ -2281,16 +2201,16 @@ const GPTResearcher = (() => {
     if (mcpConfig) {
       mcpConfig.value = JSON.stringify(exampleConfig, null, 2);
       validateMCPConfig();
-      showToast('Example configuration loaded!');
+      showToast('示例配置已加载！');
     }
   };
 
   // Update retriever configuration for MCP
   const updateRetrieverForMCP = (enableMCP) => {
     if (enableMCP) {
-      showToast('MCP enabled - will be included in research process');
+      showToast('已启用 MCP，将在研究过程中使用');
     } else {
-      showToast('MCP disabled - using web search only');
+      showToast('已关闭 MCP，将使用所选研究来源');
     }
   };
 
@@ -2315,32 +2235,32 @@ const GPTResearcher = (() => {
         <button class="mcp-info-close" onclick="closeMCPInfo()">
           <i class="fas fa-times"></i>
         </button>
-        <h3>Model Context Protocol (MCP)</h3>
-        <p>MCP enables GPT Researcher to connect with external tools and data sources through a standardized protocol.</p>
+        <h3>模型上下文协议（MCP）</h3>
+        <p>MCP 通过标准化协议，让 GPT Researcher 连接外部工具和数据源。</p>
         
-        <h4 class="highlight">Benefits:</h4>
+        <h4 class="highlight">功能：</h4>
         <ul>
-          <li><span class="highlight">Access Local Data:</span> Connect to databases, file systems, and APIs</li>
-          <li><span class="highlight">Use External Tools:</span> Integrate with web services and third-party tools</li>
-          <li><span class="highlight">Extend Capabilities:</span> Add custom functionality through MCP servers</li>
-          <li><span class="highlight">Maintain Security:</span> Controlled access with proper authentication</li>
+          <li><span class="highlight">访问本地数据：</span> 连接数据库、文件系统和 API</li>
+          <li><span class="highlight">使用外部工具：</span> 接入网络服务和第三方工具</li>
+          <li><span class="highlight">扩展功能：</span> 通过 MCP 服务添加自定义功能</li>
+          <li><span class="highlight">访问控制：</span> 通过身份验证控制访问权限</li>
         </ul>
 
-        <h4 class="highlight">Quick Start:</h4>
+        <h4 class="highlight">使用步骤：</h4>
         <ul>
-          <li>Enable MCP using the checkbox above</li>
-          <li>Click a preset to add pre-configured servers to the JSON</li>
-          <li>Or paste your own MCP configuration as a JSON array</li>
-          <li>Start your research - MCP will run with optimal settings</li>
+          <li>勾选表单中的“启用 MCP”</li>
+          <li>点击预设，将服务配置添加到 JSON 中</li>
+          <li>也可以粘贴自己的 MCP 配置，格式为 JSON 数组</li>
+          <li>开始研究，系统将根据配置调用 MCP 服务</li>
         </ul>
 
-        <h4 class="highlight">Configuration Format:</h4>
-        <p>Each MCP server should be a JSON object with these properties:</p>
+        <h4 class="highlight">配置格式：</h4>
+        <p>每个 MCP 服务对应一个 JSON 对象，包含以下字段：</p>
         <ul>
-          <li><span class="highlight">name:</span> Unique identifier (e.g., "github", "filesystem")</li>
-          <li><span class="highlight">command:</span> Command to run the server (e.g., "npx", "python")</li>
-          <li><span class="highlight">args:</span> Array of arguments (e.g., ["-y", "@modelcontextprotocol/server-github"])</li>
-          <li><span class="highlight">env:</span> Object with environment variables (e.g., {"API_KEY": "your_key"})</li>
+          <li><span class="highlight">name:</span> 唯一标识，例如 "github"、"filesystem"</li>
+          <li><span class="highlight">command:</span> 启动服务的命令，例如 "npx"、"python"</li>
+          <li><span class="highlight">args:</span> 命令参数数组，例如 ["-y", "@modelcontextprotocol/server-github"]</li>
+          <li><span class="highlight">env:</span> 环境变量对象，例如 {"API_KEY": "your_key"}</li>
         </ul>
       </div>
     `;
@@ -2417,11 +2337,11 @@ const GPTResearcher = (() => {
       if (existingIndex !== -1) {
         // Replace existing server
         currentConfig[existingIndex] = config;
-        showToast(`Updated ${preset} MCP server configuration`);
+        showToast(`已更新 ${preset} MCP 服务配置`);
       } else {
         // Add new server
         currentConfig.push(config);
-        showToast(`Added ${preset} MCP server configuration`);
+        showToast(`已添加 ${preset} MCP 服务配置`);
       }
 
       mcpConfig.value = JSON.stringify(currentConfig, null, 2);
@@ -2429,7 +2349,7 @@ const GPTResearcher = (() => {
 
     } catch (error) {
       console.error('Error adding preset:', error);
-      showToast('Error adding preset configuration');
+      showToast('添加预设配置失败');
     }
   };
 
@@ -2449,7 +2369,7 @@ const GPTResearcher = (() => {
 
     // Validate configuration before collecting
     if (!validateMCPConfig()) {
-      showToast('Invalid MCP configuration - please fix errors before submitting');
+      showToast('MCP 配置无效，请修正后再提交');
       return null;
     }
 
@@ -2464,7 +2384,7 @@ const GPTResearcher = (() => {
       };
     } catch (error) {
       console.error('Error collecting MCP data:', error);
-      showToast('Error processing MCP configuration');
+      showToast('处理 MCP 配置失败');
       return null;
     }
   };

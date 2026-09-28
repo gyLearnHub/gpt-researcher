@@ -24,6 +24,42 @@ A lightweight solution using FastAPI to serve static files.
 
 3. Access at `http://localhost:8000`
 
+#### Desktop workspace UI
+
+The static frontend uses `index.html`, `workspace.css`, `workspace.js`, and the
+existing research transport in `scripts.js`. It provides a light history sidebar,
+collapsed research settings/progress, compact report cards, and a resizable report
+reader. Downloads use the Word/PDF/Markdown paths returned by the backend;
+unavailable formats stay disabled. History reads the existing Markdown files from
+`outputs/`, so those files must be retained.
+
+This version preserves the current report-scoped chat. It does not introduce
+automatic research routing or persistent multi-report conversations.
+
+#### UI regression tests
+
+With the server running and Playwright available on the Node module path, run
+from the repository root:
+
+```sh
+node --check frontend/scripts.js
+node --check frontend/workspace.js
+node --test tests/frontend/workspace.test.cjs
+python -m pytest tests/backend tests/test_websocket_manager.py --timeout=60
+```
+
+`GPTR_UI_BASE_URL` overrides the default `http://127.0.0.1:8000`.
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` can select an existing Chromium executable.
+Browser tests intercept research WebSockets before navigation, use an isolated
+browser context, and write clearly named fixtures/screenshots under `outputs/`.
+They do not call search or model providers. Download fixtures exercise the UI;
+they are not evidence of backend document conversion.
+
+PDF conversion additionally requires WeasyPrint's native Pango/GLib libraries.
+On Windows, point `WEASYPRINT_DLL_DIRECTORIES` at the directory containing those
+DLLs **before starting Python**. See the
+[official installation instructions](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#windows).
+
 #### Demo
 https://github.com/assafelovic/gpt-researcher/assets/13554167/dd6cf08f-b31e-40c6-9907-1915f52a7110
 
