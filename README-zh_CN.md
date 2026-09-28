@@ -19,10 +19,7 @@
 [![Twitter Follow](https://img.shields.io/twitter/follow/assaf_elovic?style=social)](https://twitter.com/assaf_elovic)
 
 [English](README.md) |
-[中文](README-zh_CN.md) |
-[日本語](README-ja_JP.md) |
-[한국어](README-ko_KR.md) |
-[Русский](README-ru_RU.md)
+[中文](README-zh_CN.md)
 </div>
 
 # 🔎 GPT Researcher
@@ -147,7 +144,7 @@ GPT Researcher 支持 **LangSmith** 以增强链路追踪和可观测性，特�
 2. 正常运行研究任务。所有基于 LangGraph 的智能体交互将自动被追踪，并可在您的 LangSmith 控制台中查看可视化结果。
 
 ## 🚀 贡献
-我们非常欢迎您的贡献！如果您感兴趣，请查看 [contributing](CONTRIBUTING.md)。
+我们非常欢迎您的贡献！
 
 如果您有兴趣加入我们的任务，请查看我们的 [路线图](https://trello.com/b/3O7KBePw/gpt-researcher-roadmap) 页面，并通过我们的 [Discord 社区](https://discord.gg/QgZXvJAccX) 联系我们。
 

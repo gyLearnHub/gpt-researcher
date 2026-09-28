@@ -34,4 +34,5 @@ if __name__ == "__main__":
     import uvicorn
     
     logger.info("Starting server...")
+    logger.info("Open in browser after startup: http://127.0.0.1:8000")
     uvicorn.run(app, host="0.0.0.0", port=8000)
